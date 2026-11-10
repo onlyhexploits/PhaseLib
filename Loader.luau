@@ -1,4 +1,4 @@
-local BaseUrl = "https://raw.githubusercontent.com/onlyhexploits/PhaseLib/main/src/"
+local BaseUrl = "https://raw.githubusercontent.com/onlyhexploits/PhaseLib/main/Src/"
 
 local cache = {}
 local loading = {}
