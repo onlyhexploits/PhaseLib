@@ -29,6 +29,8 @@ function Window.new(library, config)
 		DestroyOnClose = false,
 		Visible = true,
 		SearchBarPosition = "Top",
+		AutoScale = true,
+		MinScale = 0.4,
 	}, config)
 
 	assert(
@@ -55,6 +57,7 @@ function Window.new(library, config)
 	self._offset = Vector2.zero
 	self._listening = false
 	self._compact = nil
+	self._fitScale = 1
 	self._toggleKey = config.ToggleKey
 	self._config = config
 
@@ -280,19 +283,22 @@ function Window.new(library, config)
 
 		local startSize = Vector2.zero
 		local startOffset = Vector2.zero
+		local startFit = 1
 		Utility.Drag(grip, janitor, {
 			Began = function()
 				self.Overlay:Dismiss()
 				startSize = self._current
 				startOffset = self._offset
+				startFit = self._fitScale
 			end,
 			Changed = function(_, delta)
+				local localDelta = delta / startFit
 				local newSize = Vector2.new(
-					math.max(startSize.X + delta.X, Metrics.MinWindowSize.X),
-					math.max(startSize.Y + delta.Y, Metrics.MinWindowSize.Y)
+					math.max(startSize.X + localDelta.X, Metrics.MinWindowSize.X),
+					math.max(startSize.Y + localDelta.Y, Metrics.MinWindowSize.Y)
 				)
 				self._size = newSize
-				self._offset = startOffset + (newSize - startSize) / 2
+				self._offset = startOffset + (newSize - startSize) * startFit / 2
 				self:_fit()
 			end,
 		})
@@ -403,15 +409,28 @@ function Window:_applyLayout()
 end
 
 function Window:_fit()
+	local config = self._config
 	local viewport = self:_viewport()
+	local limitX = viewport.X * Metrics.ScreenFraction
+	local limitY = viewport.Y * Metrics.ScreenFraction
+	local wantX = math.max(self._size.X, Metrics.MinWindowSize.X)
+	local wantY = math.max(self._size.Y, Metrics.MinWindowSize.Y)
+
+	local fit = 1
+	if config.AutoScale then
+		fit = math.clamp(math.min(limitX / wantX, limitY / wantY, 1), config.MinScale, 1)
+	end
+	self._fitScale = fit
+	self._scale.Scale = self._open and fit or 0.96 * fit
+
 	local maxX = math.huge
 	local maxY = math.huge
-	if self._config.FitToScreen then
-		maxX = viewport.X * Metrics.ScreenFraction
-		maxY = viewport.Y * Metrics.ScreenFraction
+	if config.FitToScreen then
+		maxX = limitX / fit
+		maxY = limitY / fit
 	end
-	local width = math.min(math.max(self._size.X, Metrics.MinWindowSize.X), maxX)
-	local height = math.min(math.max(self._size.Y, Metrics.MinWindowSize.Y), maxY)
+	local width = math.min(wantX, maxX)
+	local height = math.min(wantY, maxY)
 	self._current = Vector2.new(math.floor(width), math.floor(height))
 	self.Root.Size = UDim2.fromOffset(self._current.X, self._current.Y)
 	self:_applyLayout()
@@ -421,8 +440,8 @@ end
 function Window:_clamp()
 	if self._config.ClampToScreen then
 		local viewport = self:_viewport()
-		local halfWidth = self._current.X / 2
-		local halfHeight = self._current.Y / 2
+		local halfWidth = self._current.X * self._fitScale / 2
+		local halfHeight = self._current.Y * self._fitScale / 2
 		local limitX = math.max(viewport.X / 2 + halfWidth - 96, 1)
 		local minY = -viewport.Y / 2 + halfHeight
 		local maxY = math.max(viewport.Y / 2 - Metrics.TopBarHeight + halfHeight, minY)
@@ -459,7 +478,7 @@ function Window:Open()
 	self._open = true
 	self._token = self._token + 1
 	if not self.Root.Visible then
-		self._scale.Scale = 0.96
+		self._scale.Scale = 0.96 * self._fitScale
 		self.Frame.GroupTransparency = 1
 		self._outlineStroke.Transparency = 1
 		self.Root.Visible = true
@@ -467,7 +486,7 @@ function Window:Open()
 	if self._launcher then
 		self._launcher.Visible = false
 	end
-	Animation.Tween(self._scale, "Window", { Scale = 1 })
+	Animation.Tween(self._scale, "Window", { Scale = self._fitScale })
 	Animation.Tween(self.Frame, "Window", { GroupTransparency = 0 })
 	Animation.Tween(self._outlineStroke, "Window", { Transparency = 0 })
 end
@@ -480,7 +499,7 @@ function Window:Close()
 	self.Overlay:Dismiss()
 	self._token = self._token + 1
 	local token = self._token
-	Animation.Tween(self._scale, "Window", { Scale = 0.96 })
+	Animation.Tween(self._scale, "Window", { Scale = 0.96 * self._fitScale })
 	Animation.Tween(self._outlineStroke, "Window", { Transparency = 1 })
 	local fade = Animation.Tween(self.Frame, "Window", { GroupTransparency = 1 })
 	fade.Completed:Once(function()
